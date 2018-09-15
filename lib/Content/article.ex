@@ -1,11 +1,20 @@
 defmodule CommentServer.Content.Article do
   alias CommentServer.Database.Operations
   alias CommentServer.Content.Domain
+  alias CommentServer.Content.Timestamp
+  alias CommentServer.Util.H
   alias __MODULE__
 
+  @stale_time 12 * 60 * 60
+  @stale_units :second
   @enforce_keys [:domain, :full_url]
   # we would like accesses to be a tuple, but that can't be represented in JSON so :'('
-  defstruct db_id: "", domain: nil, full_url: nil, accesses: [], extra: %{}
+  defstruct db_id: "",
+            domain: nil,
+            full_url: nil,
+            accesses: [],
+            extra: %{},
+            updated: Timestamp.new()
 
   @table "articles"
   @keys %{
@@ -15,7 +24,8 @@ defmodule CommentServer.Content.Article do
     domain_id: "domain_id",
     full_url: "full_url",
     accesses: "accesses",
-    extra: "extra"
+    extra: "extra",
+    updated: "updated"
   }
 
   def exists?(%Article{db_id: "", full_url: full_url}), do: host_path_exists(full_url)
@@ -28,42 +38,49 @@ defmodule CommentServer.Content.Article do
     host_path_exists(url)
   end
 
-  def create(url) do
-    with domain <- Domain.create(url) do
-      %Article{domain: domain, full_url: url}
+  def fresh?(d, get \\ false)
+
+  def fresh?(%Article{full_url: full_url}, get), do: fresh?(full_url, get)
+
+  def fresh?(url, get) do
+    with {:ok, article} <- get_from_full_url(url) do
+      case get do
+        true -> {fresh(article), article}
+        false -> fresh(article)
+      end
     end
   end
 
-  def get_from_full_url(full_url), do: Operations.get(%{full_url: full_url}, @table) |> to_article
-  def get_from_id(id), do: Operations.get(%{id: id}, @table) |> to_article
+  defp fresh(nil), do: false
+  defp fresh(%Article{updated: up}), do: Timestamp.within_range(up, @stale_time, @stale_units)
 
-  def insert(article, need_db_id \\ false) do
-    case exists?(article) do
-      # todo: is this right?
-      true ->
-        case need_db_id do
-          true ->
-            # TODO: Use cache to avoid this
-            # need this now to include db_id
-            {:ok, get_from_full_url(article.full_url)}
+  def create(url) do
+    with {:ok, domain} <- Domain.create(url) do
+      {:ok, %Article{domain: domain, full_url: url, updated: Timestamp.new()}}
+    end
+  end
 
-          false ->
-            {:ok, article}
-        end
+  def get_from_full_url(full_url), do: get_map(%{full_url: full_url})
 
-      false ->
-        with {:ok, domain} <- Domain.insert(article.domain, true),
-             article <- Map.put(article, :domain, domain) do
-          case article |> to_map |> Operations.put(@table) do
-            {:ok, db_id} ->
-              {:ok, Map.put(article, :db_id, db_id)}
+  def get_from_id(id), do: get_map(%{id: id})
 
-            other ->
-              other
-          end
-        else
-          other -> other
-        end
+  def insert_if_stale(article) do
+    case fresh?(article, true) do
+      {true, article} -> {:ok, article}
+      {false, _} -> insert(article)
+    end
+  end
+
+  def insert(article) do
+    with {:ok, domain} <- Domain.insert_if_stale(article.domain),
+         article <- Map.put(article, :domain, domain) do
+      case article |> to_map |> Operations.put(@table) do
+        {:ok, db_id} ->
+          {:ok, Map.put(article, :db_id, db_id)}
+
+        other ->
+          other
+      end
     end
   end
 
@@ -75,18 +92,29 @@ defmodule CommentServer.Content.Article do
   # defp host_exists(host), do: Operations.exists?(%{"host": host}, @table)
   defp host_path_exists(full_url), do: Operations.exists?(%{full_url: full_url}, @table)
 
+  defp get_map(map) do
+    case Operations.get(map, @table) do
+      {:ok, []} -> {:ok, nil}
+      {:ok, result} -> {:ok, to_article(result)}
+      other -> other
+    end
+  end
+
   defp to_article(lst) when is_list(lst), do: Enum.map(lst, &to_article/1)
 
   defp to_article({:ok, domain_map}), do: to_article(domain_map)
 
   defp to_article(article) do
-    %Article{
-      db_id: article[@keys.db_id],
-      domain: Domain.get_from_id(article[@keys.domain_id]),
-      full_url: article[@keys.full_url],
-      accesses: article[@keys.accesses],
-      extra: article[@keys.extra]
-    }
+    with {:ok, d} <- Domain.get_from_id(article[@keys.domain_id]) do
+      %Article{
+        db_id: article[@keys.db_id],
+        domain: d,
+        full_url: article[@keys.full_url],
+        accesses: article[@keys.accesses],
+        extra: article[@keys.extra],
+        updated: Timestamp.from_db_format(article[@keys.updated])
+      }
+    end
   end
 
   defp to_map(c) do
@@ -94,7 +122,8 @@ defmodule CommentServer.Content.Article do
       @keys.domain_id => c.domain.db_id,
       @keys.full_url => c.full_url,
       @keys.accesses => c.accesses,
-      @keys.extra => c.extra
+      @keys.extra => c.extra,
+      @keys.updated => Timestamp.to_db_format(c.updated)
     }
   end
 end

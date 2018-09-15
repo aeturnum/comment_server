@@ -37,22 +37,35 @@ defmodule CommentServer.Database.Operations do
   end
 
   def delete(pattern, table_name) do
+    case do_delete(pattern, table_name) do
+      {:ok, result = %{"deleted" => count}} ->
+        case count do
+          0 ->
+            Error.new(
+              "Delete of #{inspect(pattern)} failed! \nresponse: #{inspect(result)} \n items: #{
+                inspect(Query.table(table_name) |> run())
+              }"
+            )
+
+          _ ->
+            :ok
+        end
+
+      result ->
+        Error.new(
+          "Delete of #{inspect(pattern)} failed! \nresponse: #{inspect(result)} \n items: #{
+            inspect(Query.table(table_name) |> run())
+          }"
+        )
+    end
+  end
+
+  defp do_delete(pattern, table_name) do
     result =
       Query.table(table_name)
       |> Query.filter(pattern)
       |> Query.delete()
       |> run()
-      |> case do
-        {:ok, %{"deleted" => 1}} ->
-          :ok
-
-        result ->
-          Error.new(
-            "Delete of #{inspect(pattern)} failed! \nresponse: #{inspect(result)} \n items: #{
-              inspect(Query.table(table_name) |> run())
-            }"
-          )
-      end
 
     H.debug("delete #{table_name}.#{inspect(pattern)} -> #{inspect(result)}")
     result
