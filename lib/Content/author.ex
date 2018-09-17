@@ -50,6 +50,12 @@ defmodule CommentServer.Content.Author do
             profile_url: "",
             updated: Timestamp.new()
 
+  defimpl String.Chars, for: Author do
+    def to_string(%{db_id: db_id, username: uname, updated: u}) do
+      "%Author{id: #{db_id}, username: #{uname}, updated: #{u})"
+    end
+  end
+
   def create(args) do
     # check our arguments
     optional_keys = [
@@ -117,21 +123,23 @@ defmodule CommentServer.Content.Author do
   def fresh?(username, get) do
     with {:ok, author} <- get_from_username(username),
          f <- fresh(author) do
-      case get do
-        true ->
-          H.debug("Author.fresh?(#{username}) -> #{f}")
-          {f, author}
-
-        false ->
-          H.debug("Author.fresh?(#{username}) -> #{f}")
-          f
-      end
+      H.debug("Author.fresh?(#{username}) -> #{f}")
+      H.pack_if(f, get, author)
     end
   end
 
   defp fresh(nil), do: false
   defp fresh(:anon), do: true
   defp fresh(%Author{updated: up}), do: Timestamp.within_range(up, @stale_time, @stale_units)
+
+  defp pick_action(new_author, nil), do: {:insert, new_author}
+
+  defp pick_action(new_author = %Author{}, existing_author = %Author{}) do
+    case fresh(existing_author) do
+      true -> {:none, existing_author}
+      false -> {:update, new_author}
+    end
+  end
 
   def delete(%Author{db_id: "", username: username, domain: %Domain{db_id: dbid}}),
     do: Operations.delete(%{username: username, domain_id: dbid}, @table)
@@ -141,13 +149,13 @@ defmodule CommentServer.Content.Author do
   def get_from_id("anon"), do: {:ok, :anon}
   def get_from_id(id), do: get_map(%{id: id})
 
+  def get_from_username(%Author{username: username}), do: get_map(%{username: username})
   def get_from_username(username), do: get_map(%{username: username})
 
-  def insert(author, need_db_id \\ false)
   # special case for :anon
-  def insert(:anon, _), do: {:ok, :anon}
+  def insert(:anon), do: {:ok, :anon}
 
-  def insert(author, need_db_id) do
+  def insert(author) do
     with {:ok, domain} <- Domain.insert_if_stale(author.domain),
          author <- Map.put(author, :domain, domain) do
       to_map(author)
@@ -164,6 +172,34 @@ defmodule CommentServer.Content.Author do
       end
     else
       other -> other
+    end
+  end
+
+  def update(author) do
+    H.debug("Author.update(#{author})")
+
+    author
+    |> to_map
+    |> Operations.update(@table)
+
+    {:ok, author}
+  end
+
+  def insert_or_update(author) do
+    with {:ok, old_author} <- get_from_username(author) do
+      case pick_action(author, old_author) do
+        {:none, fresh_author} ->
+          H.debug("Author.insert_or_update(#{author}) -> none")
+          {:ok, fresh_author}
+
+        {:insert, fresh_author} ->
+          H.debug("Author.insert_or_update(#{author}) -> insert")
+          insert(fresh_author)
+
+        {:update, fresh_author} ->
+          H.debug("Author.insert_or_update(#{author}) -> update")
+          update(fresh_author)
+      end
     end
   end
 

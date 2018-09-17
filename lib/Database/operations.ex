@@ -86,6 +86,17 @@ defmodule CommentServer.Database.Operations do
     |> H.pack(:ok)
   end
 
+  def update(map_of_values, table_name) do
+    # IO.puts("putting to db: #{inspect(map_of_values)}")
+
+    Query.table(table_name)
+    |> Query.update(map_of_values)
+    |> run
+    |> Error.ok?()
+
+    :ok
+  end
+
   def setup_tables() do
     with :ok <- init_database(),
          {:ok, current_tables} <- table_names() do
