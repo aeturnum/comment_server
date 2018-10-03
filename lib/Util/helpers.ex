@@ -1,6 +1,9 @@
 defmodule CommentServer.Util.H do
   @debug false
 
+  def as_list(i) when is_list(i), do: i
+  def as_list(i), do: [i]
+
   def pack(result, atom), do: {atom, result}
 
   def pack_if(t = {}, true, object), do: Tuple.append(t, object)
@@ -27,4 +30,23 @@ defmodule CommentServer.Util.H do
   defp dprint([]), do: :ok
 
   defp dprint(object), do: IO.inspect(object)
+
+  @known_keys %{
+    "username" => :username,
+    "password" => :password
+  }
+
+  def replace_known_keys(map) do
+    Enum.reduce(Map.keys(@known_keys), map, fn swap_key, map ->
+      case Map.has_key?(map, swap_key) do
+        true ->
+          map
+          |> Map.put(@known_keys[swap_key], map[swap_key])
+          |> Map.delete(swap_key)
+
+        false ->
+          map
+      end
+    end)
+  end
 end

@@ -152,7 +152,7 @@ defmodule CommentServer.Content.Comment do
 
     comment
     |> to_map
-    |> Operations.update(@table)
+    |> Operations.update(comment, @table)
 
     {:ok, comment}
   end

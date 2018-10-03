@@ -19,7 +19,7 @@ defmodule CommentServer.Scrapers.Breitbart do
   end
 
   defp create_initial_data_structure(url) do
-    with article <- Article.create(url),
+    with {:ok, article} <- Article.create(url),
          {:ok, article} <- Article.insert(article) do
       %{article: article, error: nil}
     else
@@ -128,7 +128,7 @@ defmodule CommentServer.Scrapers.Breitbart do
     end
   end
 
-  defp process_comments(state, comments) do
+  defp process_comments(_state, comments) do
     comments["response"]
     |> Enum.each(fn comment ->
       Task.start(fn ->

@@ -180,7 +180,7 @@ defmodule CommentServer.Content.Author do
 
     author
     |> to_map
-    |> Operations.update(@table)
+    |> Operations.update(author, @table)
 
     {:ok, author}
   end

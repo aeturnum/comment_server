@@ -17,7 +17,7 @@ defmodule CommentServer.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:cowboy, :logger, :httpoison, :plug],
+      extra_applications: [:cowboy, :ranch, :logger, :httpoison, :plug],
       mod: {CommentServer, []}
     ]
   end
@@ -43,7 +43,13 @@ defmodule CommentServer.MixProject do
       # rethink support
       # {:rethinkdb, "~> 0.4"}
       # use github branch with updates
-      {:rethinkdb, github: "vaartis/rethinkdb-elixir", branch: "master"}
+      {:rethinkdb, github: "vaartis/rethinkdb-elixir", branch: "master"},
+      # password hashing because we need accounts because the internet sucks
+      {:comeonin, "~> 4.0"},
+      # Argon support library
+      {:argon2_elixir, "~> 1.2"},
+      # UUID generator for session tokens
+      {:elixir_uuid, "~> 1.2"}
     ]
   end
 end

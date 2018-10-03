@@ -5,7 +5,7 @@ defmodule CommentServer.Database.Operations do
   alias CommentServer.Util.H
 
   @database Application.get_env(:comment_server, :database).db
-  @system_tables ["users", "comments", "domains", "authors", "articles"]
+  @system_tables ["users", "comments", "domains", "authors", "articles", "system_users"]
 
   def exists?(id, table_name) when is_binary(id) do
     Query.table(table_name)
@@ -33,6 +33,12 @@ defmodule CommentServer.Database.Operations do
   def get(pattern, table_name) do
     Query.table(table_name)
     |> Query.filter(pattern)
+    |> run()
+  end
+
+  def search(search_function, table_name) do
+    Query.table(table_name)
+    |> Query.filter(search_function)
     |> run()
   end
 
@@ -86,10 +92,14 @@ defmodule CommentServer.Database.Operations do
     |> H.pack(:ok)
   end
 
-  def update(map_of_values, table_name) do
-    # IO.puts("putting to db: #{inspect(map_of_values)}")
+  def update(_, o = %{db_id: ""}, _),
+    do: {:error, "Object #{inspect(o)} must have db_id!"}
+
+  def update(map_of_values, %{db_id: id}, table_name) do
+    # IO.puts("updating to db: #{inspect(map_of_values)}")
 
     Query.table(table_name)
+    |> Query.get(id)
     |> Query.update(map_of_values)
     |> run
     |> Error.ok?()
@@ -170,19 +180,6 @@ defmodule CommentServer.Database.Operations do
       "#{info.host}:#{info.port}[#{info.db}]"
     end
   end
-
-  # defp eat_rethink_obj(r = %RethinkDB.Response{data: data}) when @debug do
-  #   IO.inspect r
-  #   data
-  # end
-  # defp eat_rethink_obj(r = %RethinkDB.Record{data: data}) when @debug do
-  #   IO.inspect r
-  #   data
-  # end
-  # defp eat_rethink_obj(r = %RethinkDB.Collection{data: data}) when @debug do
-  #   IO.inspect r
-  #   data
-  # end
 
   defp eat_rethink_obj(%RethinkDB.Response{data: data}), do: data
   defp eat_rethink_obj(%RethinkDB.Record{data: data}), do: data

@@ -21,6 +21,16 @@ defmodule CommentServer do
 
     opts = [strategy: :one_for_one, name: CommentServer.Supervisor]
     Supervisor.start_link(children, opts)
-    # HTTPoison.start()
+    dispatch_config = CommentServer.HTTP.Router.build_dispatch_config()
+
+    {:ok, _} =
+      :cowboy.start_clear(
+        # name, not important
+        :http,
+        # keyword args
+        [{:port, 8081}],
+        # environment
+        %{env: %{dispatch: dispatch_config}}
+      )
   end
 end
