@@ -1,14 +1,14 @@
 defmodule CommentServer.HTTP.Headers do
   def add_headers(conn, keyword_headers) do
     headers = make_headers(keyword_headers)
-    put_headers(conn, headers)
+    add_headers_to_response(conn, headers)
   end
 
-  def put_headers(conn, []), do: conn
+  def add_headers_to_response(conn, []), do: conn
 
-  def put_headers(conn, [{key, value} | rest]) do
+  def add_headers_to_response(conn, [{key, value} | rest]) do
     Plug.Conn.put_resp_header(conn, key |> to_string, value |> to_string)
-    |> put_headers(rest)
+    |> add_headers_to_response(rest)
   end
 
   def make_headers([]), do: []
@@ -46,7 +46,7 @@ defmodule CommentServer.HTTP.Headers do
       cookie_map,
       [],
       fn {key, value}, lst ->
-        [["set-cookie": Plug.Conn.Cookies.encode("#{key}=#{value}")] | lst]
+        ["set-cookie": Plug.Conn.Cookies.encode(key, %{value: value})] ++ lst
       end
     )
   end

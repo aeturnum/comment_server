@@ -115,11 +115,22 @@ defmodule CommentServer.Admin.SystemUser do
   def add_session(%SystemUser{db_id: ""}), do: {:error, "User does not exist in DB"}
 
   def add_session(user = %SystemUser{db_id: _id, sessions: sess}) do
-    with new_session <- UUID.uuid4() do
+    with new_session <- UUID.uuid4(:hex) do
+      IO.puts("Creating new session #{new_session}")
+
       case update(%{user | sessions: [new_session | sess]}) do
         {:ok, _} -> {:ok, new_session}
         other -> other
       end
+    end
+  end
+
+  def remove_session(user = %SystemUser{sessions: s}, s_to_remove) do
+    %{user | sessions: Enum.filter(s, fn sess -> sess != s_to_remove end)}
+    |> update()
+    |> case do
+      {:ok, user} -> {:ok, user}
+      other -> other
     end
   end
 
