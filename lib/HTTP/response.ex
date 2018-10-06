@@ -10,6 +10,10 @@ defmodule CommentServer.HTTP.Response do
             json: nil,
             text: ""
 
+  # Jodie Foster Ok to go GIF
+  def call_if_ok(conn = %{@r_a => %{status: :ok}}, f, args), do: apply(f, [conn | args])
+  def call_if_ok(conn, _, _), do: conn
+
   def set_json(conn, json_map) do
     with conn = %{@r_a => r} <- add_struct(conn) do
       Map.put(conn, @r_a, %{r | json: json_map})

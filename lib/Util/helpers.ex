@@ -1,6 +1,8 @@
 defmodule CommentServer.Util.H do
   @debug false
 
+  def pid_num(), do: self() |> inspect() |> String.slice(5..-2)
+
   def as_list(i) when is_list(i), do: i
   def as_list(i), do: [i]
 

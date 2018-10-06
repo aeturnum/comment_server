@@ -49,7 +49,9 @@ defmodule CommentServer.MixProject do
       # Argon support library
       {:argon2_elixir, "~> 1.2"},
       # UUID generator for session tokens
-      {:elixir_uuid, "~> 1.2"}
+      {:elixir_uuid, "~> 1.2"},
+      # mutex to avoid un-needed work
+      {:mutex, "~> 1.0.0"}
     ]
   end
 end

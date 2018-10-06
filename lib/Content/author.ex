@@ -3,10 +3,11 @@ defmodule CommentServer.Content.Author do
   alias CommentServer.Content.Domain
   alias CommentServer.Content.Timestamp
   alias CommentServer.Util.H
+  alias CommentServer.Sync
   alias __MODULE__
 
   @table "authors"
-  @cache_name :cache_authors
+  @mutext_prefix "mutex_author_"
   @keys %{
     # id from rethinkdb
     db_id: "id",
@@ -41,6 +42,7 @@ defmodule CommentServer.Content.Author do
 
   defstruct db_id: "",
             domain: nil,
+            lock: 0,
             name: "",
             username: "",
             total_posts: 0,
@@ -128,6 +130,18 @@ defmodule CommentServer.Content.Author do
     end
   end
 
+  def lock_for_update(a = %Author{}) do
+    with key <- mutex_key(a) do
+      case Sync.try_to_lock(key) do
+        true ->
+          {Map.put(a, :lock, 1), true}
+
+        false ->
+          {a, false}
+      end
+    end
+  end
+
   defp fresh(nil), do: false
   defp fresh(:anon), do: true
   defp fresh(%Author{updated: up}), do: Timestamp.within_range(up, @stale_time, @stale_units)
@@ -149,7 +163,18 @@ defmodule CommentServer.Content.Author do
   def get_from_id("anon"), do: {:ok, :anon}
   def get_from_id(id), do: get_map(%{id: id})
 
-  def get_from_username(%Author{username: username}), do: get_map(%{username: username})
+  def get_from_username(:anon), do: :anon
+
+  def get_from_username(a = %Author{}) do
+    a = check_lock(a)
+
+    try do
+      get_map(%{username: a.username})
+    after
+      unlock(a)
+    end
+  end
+
   def get_from_username(username), do: get_map(%{username: username})
 
   # special case for :anon
@@ -186,34 +211,75 @@ defmodule CommentServer.Content.Author do
   end
 
   def insert_or_update(author) do
-    with {:ok, old_author} <- get_from_username(author) do
-      case pick_action(author, old_author) do
-        {:none, fresh_author} ->
-          H.debug("Author.insert_or_update(#{author}) -> none")
-          {:ok, fresh_author}
+    # use mutex per-author
+    author = check_lock(author)
 
-        {:insert, fresh_author} ->
-          H.debug("Author.insert_or_update(#{author}) -> insert")
-          insert(fresh_author)
+    try do
+      with {:ok, old_author} <- get_from_username(author) do
+        case pick_action(author, old_author) do
+          {:none, fresh_author} ->
+            H.debug("Author.insert_or_update(#{author}) -> none")
+            {:ok, fresh_author}
 
-        {:update, fresh_author} ->
-          H.debug("Author.insert_or_update(#{author}) -> update")
-          update(fresh_author)
+          {:insert, fresh_author} ->
+            H.debug("Author.insert_or_update(#{author}) -> insert")
+            insert(fresh_author)
+
+          {:update, fresh_author} ->
+            H.debug("Author.insert_or_update(#{author}) -> update")
+            update(fresh_author)
+        end
       end
+    after
+      unlock(author)
     end
   end
 
   def insert_if_stale(author) do
-    case fresh?(author, true) do
-      {true, author} ->
-        H.debug("Author.insert_if_stale(#{inspect(author)}) -> fresh, returning existing")
-        {:ok, author}
+    # use mutex per-author
+    author = check_lock(author)
 
-      {false, _} ->
-        H.debug("Author.insert_if_stale(#{inspect(author)}) -> stale, inserting")
-        insert(author)
+    try do
+      case fresh?(author, true) do
+        {true, author} ->
+          H.debug("Author.insert_if_stale(#{inspect(author)}) -> fresh, returning existing")
+          {:ok, author}
+
+        {false, _} ->
+          H.debug("Author.insert_if_stale(#{inspect(author)}) -> stale, inserting")
+          insert(author)
+      end
+    after
+      unlock(author)
     end
   end
+
+  defp check_lock(:anon), do: :ok
+
+  defp check_lock(a = %Author{lock: l}) when l > 0, do: %{a | lock: l + 1}
+
+  defp check_lock(a = %Author{lock: 0}) do
+    Sync.lock(mutex_key(a))
+    %{a | lock: 1}
+  end
+
+  defp unlock(a = %Author{lock: l}) when l < 2 do
+    # we can 'unlock' a non-locked author
+    Sync.unlock(mutex_key(a))
+    %{a | lock: 0}
+  end
+
+  defp unlock(a = %Author{lock: l}), do: %{a | lock: l - 1}
+
+  defp mutex_key(a = %Author{username: username, domain: %{host: h}}) do
+    try do
+      @mutext_prefix <> h <> ":" <> username
+    rescue
+      ArgumentError -> IO.puts("mutex_key crash: #{inspect(a)}")
+    end
+  end
+
+  defp mutex_key(:anon), do: @mutext_prefix <> "anon"
 
   defp get_map(map) do
     case Operations.get(map, @table) do

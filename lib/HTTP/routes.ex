@@ -50,9 +50,10 @@ defmodule CommentServer.HTTP.Routes do
         with session <- conn.cookies["session"] do
           IO.puts("removing #{session}")
           SystemUser.remove_session(user, session)
-        end
 
-        conn
+          conn
+          |> Headers.add_headers(cookie: %{session: ""})
+        end
     end
     |> Response.set_redirect("/")
     |> Response.send_response()

@@ -128,36 +128,74 @@ defmodule CommentServer.Scrapers.Breitbart do
     end
   end
 
-  defp process_comments(_state, comments) do
+  defp process_comments(s = %{article: a}, comments) do
     comments["response"]
     |> Enum.each(fn comment ->
       Task.start(fn ->
-        load_and_save_author(comment)
+        load_and_save_author(comment, a.domain)
         |> save_comment()
       end)
     end)
   end
 
-  defp load_and_save_author(comment = %{"author" => author}) do
-    IO.puts("author: #{author["name"]}")
+  defp get_author(author, domain) do
+    with name <- Map.get(author, "name") do
+      {:ok, a_object} =
+        Author.create(
+          domain: domain,
+          username: Map.get(author, "username", name),
+          name: name,
+          profile_url: author["profileUrl"],
+          location: author["location"],
+          joined_at: author["joinedAt"]
+        )
 
-    details =
-      with {:ok, %{body: body}} <-
-             HTTPoison.get("https://disqus.com/api/3.0/users/details.json", [], [
-               {"user", author["id"]},
-               {"api_key", @api_key}
-             ]),
-           {:ok, detail_json} <- Poison.decode(body) do
-        %{}
-      else
-        other -> other
-      end
+      a_object
+    end
+  end
 
-    comment
+  defp load_and_save_author(comment = %{"author" => author}, domain) do
+    # todo: handle anon
+    # "free"
+    author = author |> Map.delete("avatar")
+    a_object = get_author(author, domain)
+
+    case Author.lock_for_update(a_object) do
+      {a_object, true} ->
+        # we are now locked!
+
+        with {:ok, %{body: body}} <-
+               HTTPoison.get(
+                 "https://disqus.com/api/3.0/users/details.json",
+                 [],
+                 params: [
+                   {"user", author["id"]},
+                   {"api_key", @api_key}
+                 ]
+               ),
+             #
+             {:ok, detail_json} <- Poison.decode(body) do
+          a_object
+          |> Map.put(:total_posts, detail_json["numPosts"])
+          |> Map.put(:total_likes, detail_json["numLikesReceived"])
+          # will unlock
+          |> Author.insert_or_update()
+          |> case do
+            {:ok, inserted_author} ->
+              Map.put(comment, "author", inserted_author)
+          end
+        end
+
+      {a_object, false} ->
+        with {:ok, inserted_author} <- Author.get_from_username(a_object) do
+          Map.put(comment, "author", inserted_author)
+        end
+    end
   end
 
   defp save_comment(comment) do
-    IO.puts("comment: #{comment["id"]}")
+    IO.puts("comment: #{comment["id"]}, author: #{comment["author"]}")
+    :ok
   end
 
   defp err(error_string, s), do: Map.put(s, :error, error_string)

@@ -2,6 +2,7 @@ defmodule CommentServer do
   use Application
 
   def init(:ok) do
+    CommentServer.Sync.init(:ok)
   end
 
   def start(_type, _args) do
@@ -11,6 +12,7 @@ defmodule CommentServer do
 
     children = [
       worker(CommentServer.Views.Cowboy, []),
+      Mutex.child_spec(MyMutex),
       # todo: why do I need to nest this goddamn list?
       # Enum.map(list, fn {key, value} -> {:"#{key}", value} end)
       worker(CommentServer.Database.DBConnection, [
