@@ -51,7 +51,9 @@ defmodule CommentServer.MixProject do
       # UUID generator for session tokens
       {:elixir_uuid, "~> 1.2"},
       # mutex to avoid un-needed work
-      {:mutex, "~> 1.0.0"}
+      {:mutex, "~> 1.0.0"},
+      # xlsx writer
+      {:elixlsx, "~> 0.4.0"}
     ]
   end
 end

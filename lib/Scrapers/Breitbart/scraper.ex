@@ -9,8 +9,8 @@ defmodule CommentServer.Scrapers.Breitbart do
   @api_key "E8Uh5l5fHZ6gD8U3KycjAIAk46f68Zw7C6eW8WSjZvCLXebZ7p0r1yrYDrLilk2F"
   @disqus_regex ~r/var\s*disqus_identifier\s*=\s*'(\d+)'/
 
-  def scrape(url) do
-    create_initial_data_structure(url)
+  def scrape(article) do
+    create_initial_data_structure(article)
     |> get_disqus_id()
     |> get_article_title()
     |> get_first_comments()
@@ -18,13 +18,8 @@ defmodule CommentServer.Scrapers.Breitbart do
     |> IO.inspect()
   end
 
-  defp create_initial_data_structure(url) do
-    with {:ok, article} <- Article.create(url),
-         {:ok, article} <- Article.insert(article) do
-      %{article: article, error: nil}
-    else
-      other -> %{error: other}
-    end
+  defp create_initial_data_structure(article) do
+    %{article: article, error: nil}
   end
 
   defp get_disqus_id(s = %{error: nil, article: article}) do
@@ -133,7 +128,7 @@ defmodule CommentServer.Scrapers.Breitbart do
     |> Enum.each(fn comment ->
       Task.start(fn ->
         load_and_save_author(comment, a.domain)
-        |> save_comment()
+        |> save_comment(a)
       end)
     end)
   end
@@ -193,9 +188,18 @@ defmodule CommentServer.Scrapers.Breitbart do
     end
   end
 
-  defp save_comment(comment) do
-    IO.puts("comment: #{comment["id"]}, author: #{comment["author"]}")
-    :ok
+  defp save_comment(comment, article) do
+    {:ok, c} =
+      Comment.create(
+        article: article,
+        local_id: comment["id"],
+        author: comment["author"],
+        message: comment["raw_message"],
+        likes: comment["likes"],
+        parent: Map.get(comment, "parent", nil)
+      )
+
+    Comment.insert_or_update(c)
   end
 
   defp err(error_string, s), do: Map.put(s, :error, error_string)

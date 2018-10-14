@@ -137,6 +137,8 @@ defmodule CommentServer.Admin.SystemUser do
   def get_from_username(%SystemUser{username: username}), do: get_map(%{username: username})
   def get_from_username(username), do: get_map(%{username: username})
 
+  def get_from_id(db_id), do: get_map(%{id: db_id})
+
   def check_user_and_pass(username, password) do
     case get_from_username(username) do
       # no user

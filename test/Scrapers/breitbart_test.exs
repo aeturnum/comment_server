@@ -4,8 +4,12 @@ defmodule CommentServerTest.Scrapers.Breitbart do
   @moduletag :external
 
   test "scrape" do
-    Breitbart.scrape(
-      "http://www.breitbart.com/big-government/2018/05/09/disney-world-cancels-night-joy-christian-music-festival/"
-    )
+    {:ok, article} =
+      Article.create(
+        "http://www.breitbart.com/big-government/2018/05/09/disney-world-cancels-night-joy-christian-music-festival/"
+      )
+
+    {:ok, article} = Article.insert(article)
+    Breitbart.scrape(article)
   end
 end

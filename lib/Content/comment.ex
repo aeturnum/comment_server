@@ -5,11 +5,12 @@ defmodule CommentServer.Content.Comment do
   alias CommentServer.Content.Author
   alias CommentServer.Content.Timestamp
   alias CommentServer.Util.H
-  alias CommentServer.Cache
+  alias CommentServer.Sync
   alias __MODULE__
 
   @table "comments"
-  @cache_name :cache_comments
+  @mutext_prefix "mutex_comment_"
+  # @cache_name :cache_comments
   @keys %{
     # id from rethinkdb
     db_id: "id",
@@ -41,17 +42,19 @@ defmodule CommentServer.Content.Comment do
   end
 
   defstruct db_id: "",
+            lock: 0,
             article: nil,
             local_id: nil,
             author: :anon,
+            likes: 0,
             parent_id: nil,
             versions: [],
             updated: Timestamp.now()
 
   def create(args) do
     # check our arguments
-    optional_keys = [:author, :parent_id]
-    defaults = [author: :anon, parent_id: nil]
+    optional_keys = [:author, :parent_id, :likes]
+    defaults = [author: :anon, parent_id: nil, likes: 0]
 
     with true <- Keyword.has_key?(args, :article),
          true <- Keyword.has_key?(args, :local_id),
@@ -119,7 +122,16 @@ defmodule CommentServer.Content.Comment do
     end
   end
 
-  def get_from_local_id(%Comment{local_id: l_id}), do: get_map(%{local_id: l_id})
+  def get_from_local_id(c = %Comment{local_id: l_id}) do
+    c = check_lock(c)
+
+    try do
+      get_map(%{local_id: l_id})
+    after
+      unlock(c)
+    end
+  end
+
   def get_from_local_id(l_id), do: get_map(%{local_id: l_id})
 
   # todo: insert domain if needed
@@ -158,20 +170,26 @@ defmodule CommentServer.Content.Comment do
   end
 
   def insert_or_update(comment) do
-    with {:ok, old_comment} <- get_from_local_id(comment) do
-      case pick_action(comment, old_comment) do
-        {:none, fresh_comment} ->
-          H.debug("Comment.insert_or_update(#{comment}) -> none")
-          {:ok, fresh_comment}
+    comment = check_lock(comment)
 
-        {:insert, fresh_comment} ->
-          H.debug("Comment.insert_or_update(#{comment}) -> insert")
-          insert(fresh_comment)
+    try do
+      with {:ok, old_comment} <- get_from_local_id(comment) do
+        case pick_action(comment, old_comment) do
+          {:none, fresh_comment} ->
+            H.debug("Comment.insert_or_update(#{comment}) -> none")
+            {:ok, fresh_comment}
 
-        {:update, fresh_comment} ->
-          H.debug("Comment.insert_or_update(#{comment}) -> update")
-          update(fresh_comment)
+          {:insert, fresh_comment} ->
+            H.debug("Comment.insert_or_update(#{comment}) -> insert")
+            insert(fresh_comment)
+
+          {:update, fresh_comment} ->
+            H.debug("Comment.insert_or_update(#{comment}) -> update")
+            update(fresh_comment)
+        end
       end
+    after
+      unlock(comment)
     end
   end
 
@@ -191,6 +209,29 @@ defmodule CommentServer.Content.Comment do
     end
   end
 
+  defp check_lock(a = %Comment{lock: l}) when l > 0, do: %{a | lock: l + 1}
+
+  defp check_lock(a = %Comment{lock: 0}) do
+    Sync.lock(mutex_key(a))
+    %{a | lock: 1}
+  end
+
+  defp unlock(a = %Comment{lock: l}) when l < 2 do
+    # we can 'unlock' a non-locked author
+    Sync.unlock(mutex_key(a))
+    %{a | lock: 0}
+  end
+
+  defp unlock(a = %Comment{lock: l}), do: %{a | lock: l - 1}
+
+  defp mutex_key(a = %Comment{local_id: l_id, article: %Article{db_id: dbid}}) do
+    try do
+      @mutext_prefix <> dbid <> ":" <> l_id
+    rescue
+      ArgumentError -> IO.puts("mutex_key crash: #{inspect(a)}")
+    end
+  end
+
   defp to_comment(c_list) when is_list(c_list), do: Enum.map(c_list, &to_comment/1)
   defp to_comment({:ok, comment_map}), do: to_comment(comment_map)
   defp to_comment(%Comment{} = comment), do: comment
@@ -201,6 +242,7 @@ defmodule CommentServer.Content.Comment do
       %Comment{
         db_id: comment[@keys.db_id],
         article: ar,
+        likes: comment[@keys.likes],
         local_id: comment[@keys.local_id],
         author: au,
         parent_id: comment[@keys.parent_id],
@@ -213,6 +255,7 @@ defmodule CommentServer.Content.Comment do
   defp to_map(c) do
     %{
       @keys.article_id => c.article.db_id,
+      @keys.likes => c.likes,
       @keys.local_id => c.local_id,
       @keys.author_id => author_id(c),
       @keys.parent_id => c.parent_id,
